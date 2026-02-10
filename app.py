@@ -9,60 +9,44 @@ from sklearn.ensemble import RandomForestRegressor
 
 
 # =========================
-# 1) إعدادات الهوية البصرية
+# 1) إعدادات الواجهة
 # =========================
 st.set_page_config(page_title="مركز ذكاء القوى العاملة", layout="wide")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Tajawal', sans-serif;
-    text-align: right;
-}
-
-.stApp { 
-    background: radial-gradient(circle at top right, #1E293B, #0F172A, #020617); 
-}
-
-.welcome-card {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(25px);
-    border: 1px solid rgba(0, 245, 255, 0.15);
-    padding: 60px 40px;
-    border-radius: 35px;
-    text-align: center;
-    margin: 70px auto 30px auto;
-    max-width: 980px;
-    box-shadow: 0 25px 50px rgba(0,0,0,0.6);
-}
-
+html, body, [class*="css"] { font-family: 'Tajawal', sans-serif; text-align: right; }
+.stApp { background: radial-gradient(circle at top right, #1E293B, #0F172A, #020617); }
 h1 { 
-    background: linear-gradient(to left, #F8FAFC, #00F5FF); 
-    -webkit-background-clip: text; 
-    -webkit-text-fill-color: transparent; 
-    font-weight: 900 !important; 
-    font-size: 3.1rem !important;
-    text-align: center !important;
+  background: linear-gradient(to left, #F8FAFC, #00F5FF);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  font-weight: 900 !important; font-size: 3.0rem !important;
+  text-align: center !important;
 }
-
-.sidebar-signature {
-    padding-top: 25px;
-    border-top: 1px solid rgba(0, 245, 255, 0.1);
-    text-align: center;
-    margin-top: 60px;
+.small-muted { color: #94A3B8; font-size: 0.95rem; }
+.welcome-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(25px);
+  border: 1px solid rgba(0, 245, 255, 0.15);
+  padding: 50px 35px;
+  border-radius: 30px;
+  text-align: center;
+  margin: 55px auto 20px auto;
+  max-width: 980px;
+  box-shadow: 0 25px 50px rgba(0,0,0,0.6);
 }
-
+.sidebar-signature{
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 245, 255, 0.1);
+  text-align: center;
+  margin-top: 14px;
+}
 .rec-box { 
-    background: rgba(0, 245, 255, 0.07); 
-    padding: 20px; border-radius: 15px; 
-    border-right: 6px solid #00F5FF; margin-bottom: 15px; 
-    color: #F8FAFC; font-weight: 600;
-}
-.small-muted {
-    color: #94A3B8;
-    font-size: 0.95rem;
+  background: rgba(0, 245, 255, 0.07); 
+  padding: 16px; border-radius: 14px; 
+  border-right: 5px solid #00F5FF; margin-bottom: 12px; 
+  color: #F8FAFC; font-weight: 600;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -74,23 +58,57 @@ px.defaults.template = "plotly_dark"
 # 2) تحميل البيانات
 # =========================
 @st.cache_data
-def load_hr_data():
-    base_path = os.path.dirname(__file__)
-    file_path = os.path.join(base_path, "Resigned Report Date Range.xlsx")
-    df = pd.read_excel(file_path, engine="openpyxl")
-    df["تاريخ انتهاء الخدمة"] = pd.to_datetime(df["تاريخ انتهاء الخدمة"], errors="coerce")
+def load_actual_data():
+    base = os.path.dirname(__file__)
+    path = os.path.join(base, "Resigned Report Date Range.xlsx")
+    df = pd.read_excel(path, engine="openpyxl")
+    df["تاريخ انتهاء الخدمة"] = pd.to_datetime(df["تاريخ انتهاء الخدمة"], errors="coerce", dayfirst=True)
     return df
 
+@st.cache_data
+def load_forecast_file():
+    base = os.path.dirname(__file__)
+    path = os.path.join(base, "توقعات الاستقالات وتحليل البيانات.xlsx")
+    return pd.read_excel(path, engine="openpyxl")
+
 try:
-    df = load_hr_data()
+    df = load_actual_data()
     error = None
 except Exception as e:
     df = None
     error = str(e)
 
+try:
+    forecast_file_df = load_forecast_file()
+except Exception:
+    forecast_file_df = None
+
 
 # =========================
-# 3) أدوات Parsing + Filters
+# 3) تجهيز توقع الملف السنوي (مصدر ثابت)
+# =========================
+def get_file_yearly_forecast(fdf: pd.DataFrame) -> pd.DataFrame:
+    if fdf is None or fdf.empty:
+        return pd.DataFrame()
+
+    needed = {"السنة", "عدد الاستقالات المتوقع"}
+    if not needed.issubset(set(fdf.columns)):
+        return pd.DataFrame()
+
+    out = (fdf.groupby("السنة", as_index=False)["عدد الاستقالات المتوقع"]
+           .sum()
+           .rename(columns={"عدد الاستقالات المتوقع": "الاستقالات المتوقعة (ملف)"}))
+    out["السنة"] = pd.to_numeric(out["السنة"], errors="coerce").astype("Int64")
+    out = out.dropna(subset=["السنة"]).copy()
+    out["السنة"] = out["السنة"].astype(int)
+    out["الاستقالات المتوقعة (ملف)"] = pd.to_numeric(out["الاستقالات المتوقعة (ملف)"], errors="coerce").fillna(0).round().astype(int)
+    return out.sort_values("السنة").reset_index(drop=True)
+
+file_yearly_fc = get_file_yearly_forecast(forecast_file_df)
+
+
+# =========================
+# 4) أدوات Parsing + Filters
 # =========================
 AR_MONTHS = {
     "يناير": 1, "فبراير": 2, "مارس": 3, "ابريل": 4, "أبريل": 4,
@@ -102,29 +120,20 @@ def norm_ar(s: str) -> str:
     s = (s or "").strip().lower()
     s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
     s = s.replace("ة", "ه").replace("ى", "ي")
+    s = re.sub(r"\s+", " ", s)
     return s
 
 def get_ref_today(dff: pd.DataFrame) -> pd.Timestamp:
     mx = dff["تاريخ انتهاء الخدمة"].max()
-    if pd.isna(mx):
-        return pd.Timestamp.today().normalize()
-    return pd.Timestamp(mx).normalize()
+    return pd.Timestamp.today().normalize() if pd.isna(mx) else pd.Timestamp(mx).normalize()
 
 def parse_date_any(s: str):
     s = (s or "").strip()
     if not s:
         return pd.NaT
-    # محاولات شائعة
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y"):
-        try:
-            return pd.to_datetime(pd.Timestamp.strptime(s, fmt))
-        except Exception:
-            pass
-    # fallback pandas
     return pd.to_datetime(s, dayfirst=True, errors="coerce")
 
 def extract_between_dates(qn: str):
-    # من 2025-01-01 إلى 2025-03-31
     m = re.search(r"من\s+(.+?)\s+(?:الى|إلى)\s+(.+)", qn)
     if not m:
         return None
@@ -137,7 +146,6 @@ def extract_between_dates(qn: str):
     return start, end
 
 def extract_relative_range(qn: str, ref_today: pd.Timestamp):
-    # آخر 3 شهور / آخر 10 ايام / آخر أسبوع
     m = re.search(r"(?:اخر|آخر)\s+(\d+)\s*(يوم|ايام|اسبوع|اسابيع|شهر|شهور|اشهر|سنه|سنوات)", qn)
     if m:
         n = int(m.group(1))
@@ -163,7 +171,6 @@ def extract_relative_range(qn: str, ref_today: pd.Timestamp):
     return None
 
 def extract_month_year(qn: str):
-    # يناير 2025 / 2025 / فبراير 2024
     year = None
     m = re.search(r"(20\d{2})", qn)
     if m:
@@ -199,7 +206,6 @@ def get_date_range_from_question(q: str, ref_today: pd.Timestamp):
 
 def apply_sidebar_filters(df_in, date_range, dept_sel, nat_sel):
     dff = df_in.dropna(subset=["تاريخ انتهاء الخدمة"]).copy()
-
     start = pd.to_datetime(date_range[0])
     end = pd.to_datetime(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
     dff = dff[(dff["تاريخ انتهاء الخدمة"] >= start) & (dff["تاريخ انتهاء الخدمة"] <= end)]
@@ -213,21 +219,25 @@ def apply_sidebar_filters(df_in, date_range, dept_sel, nat_sel):
 def apply_question_entity_filters(dff: pd.DataFrame, q: str):
     qn = norm_ar(q)
 
-    # جهة: ...
-    m = re.search(r"(?:جهه|الجهه|جهة|الجهة)\s*[:：]\s*(.+)", qn)
+    m = re.search(r"(?:جهه|جهة|الجهه|الجهة)\s*[:：]\s*(.+)", qn)
     if m:
-        val = m.group(1).strip()[:60]
+        val = m.group(1).strip()[:80]
         dff = dff[dff["الجهة"].astype(str).str.contains(val, na=False)]
 
-    # جنسية: ...
-    m = re.search(r"(?:جنسيه|الجنسية|الجنسيه|جنسية)\s*[:：]\s*(.+)", qn)
+    m = re.search(r"(?:جنسيه|جنسية|الجنسية|الجنسيه)\s*[:：]\s*(.+)", qn)
     if m:
-        val = m.group(1).strip()[:60]
+        val = m.group(1).strip()[:80]
         dff = dff[dff["الجنسية"].astype(str).str.contains(val, na=False)]
 
     return dff
 
+
+# =========================
+# 5) سلسلة زمنية + توقع (يومي/شهري) داخل التطبيق
+# =========================
 def make_series(dff: pd.DataFrame, freq="D"):
+    if freq == "M":
+        freq = "ME"
     s = (dff.dropna(subset=["تاريخ انتهاء الخدمة"])
             .set_index("تاريخ انتهاء الخدمة")
             .resample(freq)
@@ -239,7 +249,6 @@ def make_series(dff: pd.DataFrame, freq="D"):
 
 def make_features(series: pd.Series, freq="D"):
     d = pd.DataFrame({"y": series})
-
     if freq == "D":
         d["dow"] = d.index.dayofweek
         d["dom"] = d.index.day
@@ -259,21 +268,24 @@ def make_features(series: pd.Series, freq="D"):
     y = d["y"]
     return X, y, use_lags
 
-def forecast(dff: pd.DataFrame, steps=30, freq="D"):
-    s = make_series(dff, freq=freq)
+def forecast_time(dff: pd.DataFrame, steps=30, freq="D"):
+    s = make_series(dff, freq=("ME" if freq == "M" else "D"))
 
-    # fallback إذا البيانات قليلة
-    if len(s) < (60 if freq == "D" else 12):
-        base = int(round(s.tail(30).mean())) if freq == "D" else int(round(s.tail(6).mean()))
+    min_need = 60 if freq == "D" else 12
+    if len(s) < min_need:
+        base = float(s.tail(30).mean()) if freq == "D" else float(s.tail(6).mean())
+        if np.isnan(base):
+            base = 0.0
+        base_i = int(round(base))
         future_idx = (
             pd.date_range(s.index.max() + pd.Timedelta(days=1), periods=steps, freq="D")
             if freq == "D"
             else pd.date_range(s.index.max() + pd.offsets.MonthBegin(1), periods=steps, freq="MS")
         )
-        return pd.DataFrame({"التاريخ": future_idx, "الحالات المتوقعة": [max(0, base)] * len(future_idx)})
+        return pd.DataFrame({"التاريخ": future_idx, "الحالات المتوقعة": [max(0, base_i)] * len(future_idx)})
 
-    X, y, use_lags = make_features(s, freq=freq)
-    model = RandomForestRegressor(n_estimators=400, random_state=42)
+    X, y, use_lags = make_features(s, freq=("D" if freq == "D" else "M"))
+    model = RandomForestRegressor(n_estimators=450, random_state=42)
     model.fit(X, y)
 
     future_idx = (
@@ -304,147 +316,155 @@ def forecast(dff: pd.DataFrame, steps=30, freq="D"):
         preds.append(yhat)
         s_ext.loc[dt] = yhat
 
-    out = pd.DataFrame({"التاريخ": future_idx, "الحالات المتوقعة": np.round(preds).astype(int)})
+    return pd.DataFrame({"التاريخ": future_idx, "الحالات المتوقعة": np.round(preds).astype(int)})
+
+
+# =========================
+# 6) فعلي سنوي + مقارنة فعلي×متوقع (ملف)
+# =========================
+def actual_yearly_counts(dff: pd.DataFrame) -> pd.DataFrame:
+    x = dff.dropna(subset=["تاريخ انتهاء الخدمة"]).copy()
+    x["السنة"] = x["تاريخ انتهاء الخدمة"].dt.year
+    y = x.groupby("السنة").size().reset_index(name="الاستقالات الفعلية").sort_values("السنة").reset_index(drop=True)
+    y["السنة"] = y["السنة"].astype(int)
+    return y
+
+def compare_actual_vs_file_forecast(actual_df: pd.DataFrame, file_fc: pd.DataFrame) -> pd.DataFrame:
+    if actual_df is None or actual_df.empty:
+        return pd.DataFrame()
+    out = actual_df.merge(file_fc, on="السنة", how="left")
+    out["الاستقالات المتوقعة (ملف)"] = out["الاستقالات المتوقعة (ملف)"].fillna(0).astype(int)
+    out["الفرق (فعلي-متوقع)"] = out["الاستقالات الفعلية"] - out["الاستقالات المتوقعة (ملف)"]
     return out
 
 
 # =========================
-# 4) المحلل الذكي: اختيار الرسم تلقائيًا
+# 7) auto_chart (يرد + يرسم) — السنوي من الملف
 # =========================
 def auto_chart(dff_base: pd.DataFrame, q: str, top_n=10, sidebar_info=""):
     qn = norm_ar(q)
-
-    # مرجع "آخر 3 شهور" = آخر تاريخ بالبيانات بعد فلاتر السايدبار
     ref_today = get_ref_today(dff_base)
 
-    # طبّقي فلاتر الكيان من السؤال (جهة: / جنسية:)
     dff = apply_question_entity_filters(dff_base.copy(), q)
 
-    # طبّقي فلاتر التاريخ من السؤال (آخر 3 شهور / من..الى / يناير 2025 ...)
     dr = get_date_range_from_question(q, ref_today)
-    range_text = ""
     if dr:
         start, end = dr
         end_inclusive = end + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
         dff = dff[(dff["تاريخ انتهاء الخدمة"] >= start) & (dff["تاريخ انتهاء الخدمة"] <= end_inclusive)]
-        range_text = f"📅 الفترة: من **{start.date()}** إلى **{end.date()}** (مرجع البيانات: {ref_today.date()})"
+        range_text = f"📅 الفترة: من **{start.date()}** إلى **{end.date()}** (مرجع: {ref_today.date()})"
+    else:
+        range_text = f"📅 الفترة: حسب فلاتر السايدبار (مرجع: {ref_today.date()})"
 
-    # Helpers
-    def add_footer(msg: str):
-        parts = [msg]
-        if range_text:
-            parts.append(range_text)
+    def footer(msg: str):
+        parts = [msg, range_text]
         if sidebar_info:
             parts.append(sidebar_info)
         return "\n\n".join(parts)
 
-    # ===== جدول / أحدث =====
-    if any(k in qn for k in ["اخر", "احدث", "latest", "حديث", "آخر", "أحدث"]) and any(k in qn for k in ["سجل", "سجلات", "جدول", "table"]):
-        tbl = dff.sort_values("تاريخ انتهاء الخدمة").tail(10)[["الجهة", "الجنسية", "تاريخ انتهاء الخدمة"]]
-        return add_footer("🕒 أحدث 10 سجلات:"), None, tbl
+    if dff.empty:
+        return footer("⚠️ لا توجد بيانات مطابقة للسؤال/الفلاتر."), None, None
 
-    # ===== عدد =====
+    # (A) أحدث سجلات جدول (بدون أعمدة مفقودة)
+    if ("احدث" in qn or "اخر" in qn or "latest" in qn) and ("جدول" in qn or "table" in qn or "سجلات" in qn):
+        wanted_cols = ["الجهة", "الجنسية", "تاريخ انتهاء الخدمة", "سبب الاستقالة"]
+        safe_cols = [c for c in wanted_cols if c in dff.columns]
+        tbl = dff.sort_values("تاريخ انتهاء الخدمة", ascending=False).head(10)[safe_cols]
+        return footer("🕒 أحدث 10 سجلات:"), None, tbl
+
+    # (B) عدد/إجمالي
     if any(k in qn for k in ["كم", "عدد", "اجمالي", "إجمالي", "المجموع", "total"]):
-        return add_footer(f"📊 عدد الاستقالات = **{len(dff)}**"), None, None
+        return footer(f"📊 **عدد الاستقالات = {len(dff):,}**"), None, None
 
-    # ===== توقع =====
-    if any(k in qn for k in ["توقع", "يتوقع", "تنبؤ", "يتنبا", "القادم", "الجاي", "الشهر القادم", "الاسبوع القادم"]):
-        # شهري
-        if any(k in qn for k in ["شهري", "شهر", "اشهر", "شهور"]):
-            m = re.search(r"(\d+)\s*(شهر|اشهر|شهور)", qn)
-            steps = int(m.group(1)) if m else 6
-            fc = forecast(dff, steps=steps, freq="M")
-            fig = px.bar(fc, x="التاريخ", y="الحالات المتوقعة", text_auto=True, title=f"توقع الاستقالات ({steps} أشهر)")
-            return add_footer("🔮 توقع شهري"), fig, fc
-
-        # يومي
-        m = re.search(r"(\d+)\s*(يوم|ايام)", qn)
-        steps = int(m.group(1)) if m else 30
-        fc = forecast(dff, steps=steps, freq="D")
-        fig = px.area(fc, x="التاريخ", y="الحالات المتوقعة", title=f"توقع الاستقالات ({steps} يوم)")
-        return add_footer("🔮 توقع يومي"), fig, fc
-
-    # ===== توزيع (Pie) =====
+    # (C) توزيع
     if any(k in qn for k in ["توزيع", "نسب", "نسبة", "pie", "دائره", "دائرة"]):
         if "جنس" in qn:
             vc = dff["الجنسية"].value_counts().head(top_n).rename_axis("الجنسية").reset_index(name="العدد")
-            fig = px.pie(vc, values="العدد", names="الجنسية", hole=0.4, title=f"توزيع الجنسيات (Top {top_n})")
+            fig = px.pie(vc, values="العدد", names="الجنسية", hole=0.45, title=f"توزيع الجنسيات (Top {top_n})")
             fig.update_traces(textinfo="percent+label")
-            return add_footer("🌍 توزيع الجنسيات"), fig, vc
+            return footer("🌍 توزيع الجنسيات"), fig, vc
 
-        if any(k in qn for k in ["جهه", "جهة", "قطاع", "اداره", "إدارة"]):
+        if any(k in qn for k in ["جهه", "جهة", "الجهة", "اداره", "إدارة"]):
             vc = dff["الجهة"].value_counts().head(top_n).rename_axis("الجهة").reset_index(name="العدد")
-            fig = px.pie(vc, values="العدد", names="الجهة", hole=0.4, title=f"توزيع الجهات (Top {top_n})")
+            fig = px.pie(vc, values="العدد", names="الجهة", hole=0.45, title=f"توزيع الجهات (Top {top_n})")
             fig.update_traces(textinfo="percent+label")
-            return add_footer("🏢 توزيع الجهات"), fig, vc
+            return footer("🏢 توزيع الجهات"), fig, vc
 
-    # ===== أكثر / أقل (Bar) =====
+    # (D) أكثر / أقل
     if any(k in qn for k in ["اكثر", "الأكثر", "اعلى", "أعلى", "top", "اكبر", "أكبر"]):
         if "جنس" in qn:
             vc = dff["الجنسية"].value_counts().head(top_n).rename_axis("الجنسية").reset_index(name="العدد")
             fig = px.bar(vc, x="الجنسية", y="العدد", text_auto=True, title=f"أكثر الجنسيات (Top {top_n})")
-            return add_footer("🌍 أكثر الجنسيات"), fig, vc
+            return footer("🌍 أكثر الجنسيات"), fig, vc
 
         vc = dff["الجهة"].value_counts().head(top_n).rename_axis("الجهة").reset_index(name="العدد")
         fig = px.bar(vc, x="الجهة", y="العدد", text_auto=True, title=f"أكثر الجهات (Top {top_n})")
         fig.update_layout(xaxis_tickangle=-35)
-        return add_footer("🏢 أكثر الجهات"), fig, vc
+        return footer("🏢 أكثر الجهات"), fig, vc
 
     if any(k in qn for k in ["اقل", "الأقل", "ادنى", "أدنى", "bottom"]):
         if "جنس" in qn:
             vc = dff["الجنسية"].value_counts().tail(top_n).rename_axis("الجنسية").reset_index(name="العدد")
             fig = px.bar(vc, x="الجنسية", y="العدد", text_auto=True, title=f"أقل الجنسيات (Bottom {top_n})")
-            return add_footer("📉 أقل الجنسيات"), fig, vc
+            return footer("📉 أقل الجنسيات"), fig, vc
 
         vc = dff["الجهة"].value_counts().tail(top_n).rename_axis("الجهة").reset_index(name="العدد")
         fig = px.bar(vc, x="الجهة", y="العدد", text_auto=True, title=f"أقل الجهات (Bottom {top_n})")
         fig.update_layout(xaxis_tickangle=-35)
-        return add_footer("📉 أقل الجهات"), fig, vc
+        return footer("📉 أقل الجهات"), fig, vc
 
-    # ===== ترند / زمن (Line) =====
-    if any(k in qn for k in ["ترند", "اتجاه", "عبر الزمن", "زمن", "trend", "line", "خطي", "خط"]):
-        freq = "M" if any(k in qn for k in ["شهري", "شهر"]) else "D"
+    # (E) ترند
+    if any(k in qn for k in ["ترند", "اتجاه", "عبر الزمن", "trend", "line", "خطي", "خط"]):
+        monthly = any(k in qn for k in ["شهري", "شهر"])
+        freq = "M" if monthly else "D"
         ts = make_series(dff, freq=freq).reset_index()
         ts.columns = ["التاريخ", "العدد"]
-        title = "الاتجاه شهريًا" if freq == "M" else "الاتجاه يوميًا"
-        fig = px.line(ts, x="التاريخ", y="العدد", markers=True, title=title)
-        return add_footer("📈 الاتجاه عبر الزمن"), fig, ts.tail(120)
+        fig = px.line(ts, x="التاريخ", y="العدد", markers=True, title=("الاتجاه شهريًا" if monthly else "الاتجاه يوميًا"))
+        return footer("📈 الاتجاه عبر الزمن"), fig, ts.tail(200)
 
-    # ===== نسبة جنسية محددة (سؤال مثل: كم نسبة السعوديين؟) =====
-    if any(k in qn for k in ["نسبة", "نسبه", "percent", "%"]):
-        total = len(dff)
-        if total == 0:
-            return add_footer("لا توجد بيانات ضمن الفلاتر الحالية."), None, None
-        # محاولة التقاط جنسية مذكورة
-        uniques = dff["الجنسية"].dropna().astype(str).unique().tolist()
-        for nat in uniques:
-            if norm_ar(nat) in qn:
-                count = (dff["الجنسية"].astype(str) == nat).sum()
-                pct = (count / total) * 100
-                return add_footer(f"📌 نسبة **{nat}** = **{pct:.2f}%** ({count} من {total})"), None, None
+    # (F) توقع — السنوي من ملف التوقع (توحيد)
+    if any(k in qn for k in ["توقع", "يتوقع", "تنبؤ", "يتنبا", "القادم", "الجاي"]):
+        years = sorted({int(y) for y in re.findall(r"(20\d{2})", qn)})
 
-    # Default Help
-    help_msg = (
-        "اكتبي سؤال مثل:\n"
-        "- **كم استقالوا آخر 3 شهور**\n"
-        "- **من 2025-01-01 إلى 2025-03-31 كم عدد الاستقالات**\n"
-        "- **توزيع الجنسيات** / **توزيع الجهات**\n"
-        "- **أكثر جهة** / **أقل جهة**\n"
-        "- **ترند شهري** / **ترند يومي**\n"
-        "- **توقع 30 يوم** / **توقع 6 أشهر**\n"
-        "- **أحدث سجلات جدول**\n\n"
-        "وللفلترة داخل السؤال:\n"
-        "- **كم استقالوا آخر 3 شهور جهة: الموارد البشرية**\n"
-        "- **توزيع الجنسيات جنسية: سعودي** (أو بدونها)\n"
-    )
-    return add_footer(help_msg), None, None
+        # إذا ذكر سنة/سنوات: نجيب من ملف التوقع (نفس اليسار)
+        if years:
+            if not file_yearly_fc.empty:
+                preds = file_yearly_fc[file_yearly_fc["السنة"].isin(years)].copy()
+                if not preds.empty:
+                    fig = px.bar(preds, x="السنة", y="الاستقالات المتوقعة (ملف)", text_auto=True, title="توقع سنوي (من ملف التوقع)")
+                    return footer(f"🔮 توقع سنوي من الملف للسنوات: {', '.join(map(str, years))}"), fig, preds
+
+            # fallback إذا الملف ما يغطي السنوات
+            return footer("⚠️ ملف التوقع لا يحتوي على هذه السنوات."), None, file_yearly_fc
+
+        # شهري
+        if any(k in qn for k in ["شهري", "شهر", "اشهر", "شهور"]):
+            m = re.search(r"(\d+)\s*(شهر|اشهر|شهور)", qn)
+            steps = int(m.group(1)) if m else 6
+            fc = forecast_time(dff, steps=steps, freq="M")
+            fig = px.bar(fc, x="التاريخ", y="الحالات المتوقعة", text_auto=True, title=f"توقع الاستقالات ({steps} أشهر)")
+            return footer("🔮 توقع شهري"), fig, fc
+
+        # يومي
+        m = re.search(r"(\d+)\s*(يوم|ايام)", qn)
+        steps = int(m.group(1)) if m else 30
+        fc = forecast_time(dff, steps=steps, freq="D")
+        fig = px.area(fc, x="التاريخ", y="الحالات المتوقعة", title=f"توقع الاستقالات ({steps} يوم)")
+        return footer("🔮 توقع يومي"), fig, fc
+
+    # (G) fallback: لو السؤال غير واضح -> ترند شهري افتراضي
+    ts = make_series(dff, freq="M").reset_index()
+    ts.columns = ["التاريخ", "العدد"]
+    fig = px.line(ts, x="التاريخ", y="العدد", markers=True, title="ترند شهري (افتراضي)")
+    msg = "ℹ️ ما فهمت صيغة السؤال بالكامل، فعرّضت لك **ترند شهري افتراضي**. جرّبي: (توزيع الجنسيات) / (أكثر جهة) / (توقع 30 يوم) / (توقع 2026)."
+    return footer(msg), fig, ts.tail(200)
 
 
 # =========================
-# 5) واجهة Sidebar (Filters + Chat)
+# 8) Sidebar
 # =========================
 with st.sidebar:
-    st.markdown("<h2 style='color: #00F5FF; font-size: 1.6rem;'>⚙️ لوحة التحكم</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:#00F5FF'>⚙️ لوحة التحكم</h2>", unsafe_allow_html=True)
 
     if df is None:
         st.error(f"تعذر تحميل الملف: {error}")
@@ -468,40 +488,41 @@ with st.sidebar:
 
     top_n = st.slider("Top N", 3, 20, 10)
 
-    st.markdown("---")
-    st.markdown("### 🤖 المحلل الذكي")
-    u_input = st.chat_input("اسألي: كم/توزيع/أكثر/أقل/ترند/توقع/جدول...")
+    # ---- ملف التوقع (أسفل يسار)
+    st.markdown("<div style='height: 28vh;'></div>", unsafe_allow_html=True)
+    st.markdown("### 📄 ملف التوقع (لوحده)")
+
+    if file_yearly_fc.empty:
+        st.info("ملف التوقعات غير موجود أو أعمدته غير صحيحة.")
+    else:
+        st.metric("إجمالي المتوقع (من الملف)", int(file_yearly_fc["الاستقالات المتوقعة (ملف)"].sum()))
+        fig_f = px.bar(file_yearly_fc, x="السنة", y="الاستقالات المتوقعة (ملف)", text_auto=True, title="التوقع السنوي (من الملف)")
+        st.plotly_chart(fig_f, use_container_width=True)
+        st.dataframe(file_yearly_fc, use_container_width=True)
 
     st.markdown("""
         <div class="sidebar-signature">
-            <p style="color: #94A3B8; font-size: 0.85rem; margin-bottom: 5px;">إعداد</p>
-            <p style="color: #00F5FF; font-size: 1.6rem; font-weight: 900; margin-top: 0;">دلال حكمي</p>
-            <p style="color: #475569; font-size: 0.85rem;">dalal3021@gmail.com</p>
+            <p style="color:#94A3B8;font-size:0.85rem;margin-bottom:4px;">إعداد</p>
+            <p style="color:#00F5FF;font-size:1.5rem;font-weight:900;margin:0;">دلال حكمي</p>
+            <p style="color:#475569;font-size:0.85rem;margin-top:4px;">dalal3021@gmail.com</p>
         </div>
     """, unsafe_allow_html=True)
 
 
 # =========================
-# 6) تطبيق فلاتر السايدبار
+# 9) فلاتر السايدبار
 # =========================
 dff_sidebar = apply_sidebar_filters(df, date_range, dept_sel, nat_sel)
 
-# نص يوضح فلاتر السايدبار في رد الشاتبوت
-sidebar_info_parts = []
-sidebar_info_parts.append(f"🎛️ فلاتر السايدبار: الفترة ({date_range[0]} → {date_range[1]})")
-if dept_sel:
-    sidebar_info_parts.append(f"الجهة: {', '.join(dept_sel[:3])}{'…' if len(dept_sel) > 3 else ''}")
-else:
-    sidebar_info_parts.append("الجهة: كل الجهات")
-if nat_sel:
-    sidebar_info_parts.append(f"الجنسية: {', '.join(nat_sel[:3])}{'…' if len(nat_sel) > 3 else ''}")
-else:
-    sidebar_info_parts.append("الجنسية: كل الجنسيات")
-sidebar_info = " | ".join(sidebar_info_parts)
+sidebar_info = " | ".join([
+    f"🎛️ فلاتر السايدبار: الفترة ({date_range[0]} → {date_range[1]})",
+    "الجهة: " + (", ".join(dept_sel[:3]) + ("…" if len(dept_sel) > 3 else "") if dept_sel else "كل الجهات"),
+    "الجنسية: " + (", ".join(nat_sel[:3]) + ("…" if len(nat_sel) > 3 else "") if nat_sel else "كل الجنسيات"),
+])
 
 
 # =========================
-# 7) Tabs Dashboard
+# 10) Tabs
 # =========================
 tab1, tab2, tab3, tab4 = st.tabs(["📊 نظرة عامة", "📈 الاتجاهات", "🔮 التوقعات", "🤖 اسألني"])
 
@@ -509,94 +530,124 @@ with tab1:
     st.markdown("<h1>نظرة عامة</h1>", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("إجمالي السجلات", f"{len(dff_sidebar):,}")
-    c2.metric("عدد الجهات", int(dff_sidebar["الجهة"].nunique()))
-    c3.metric("عدد الجنسيات", int(dff_sidebar["الجنسية"].nunique()))
+    c1.metric("إجمالي الاستقالات", f"{len(dff_sidebar):,}")
+    c2.metric("عدد الجهات", int(dff_sidebar["الجهة"].nunique()) if not dff_sidebar.empty else 0)
+    c3.metric("عدد الجنسيات", int(dff_sidebar["الجنسية"].nunique()) if not dff_sidebar.empty else 0)
 
-    colA, colB = st.columns(2)
+    if dff_sidebar.empty:
+        st.info("لا توجد بيانات ضمن الفلاتر الحالية.")
+    else:
+        colA, colB = st.columns(2)
+        with colA:
+            nat_counts = dff_sidebar["الجنسية"].value_counts().head(top_n).rename_axis("الجنسية").reset_index(name="العدد")
+            fig = px.pie(nat_counts, values="العدد", names="الجنسية", hole=0.45, title=f"Top {top_n} جنسيات")
+            fig.update_traces(textinfo="percent+label")
+            st.plotly_chart(fig, use_container_width=True)
 
-    with colA:
-        nat_counts = (dff_sidebar["الجنسية"].value_counts().head(top_n)
-                      .rename_axis("الجنسية").reset_index(name="العدد"))
-        fig = px.pie(nat_counts, values="العدد", names="الجنسية", hole=0.4, title=f"Top {top_n} جنسيات")
-        fig.update_traces(textinfo="percent+label")
-        st.plotly_chart(fig, use_container_width=True)
+        with colB:
+            dept_counts = dff_sidebar["الجهة"].value_counts().head(top_n).rename_axis("الجهة").reset_index(name="العدد")
+            fig = px.bar(dept_counts, x="الجهة", y="العدد", text_auto=True, title=f"Top {top_n} جهات")
+            fig.update_layout(xaxis_tickangle=-35)
+            st.plotly_chart(fig, use_container_width=True)
 
-    with colB:
-        dept_counts = (dff_sidebar["الجهة"].value_counts().head(top_n)
-                       .rename_axis("الجهة").reset_index(name="العدد"))
-        fig = px.bar(dept_counts, x="الجهة", y="العدد", text_auto=True, title=f"Top {top_n} جهات")
-        fig.update_layout(xaxis_tickangle=-35)
-        st.plotly_chart(fig, use_container_width=True)
-
-    # مبادرات مقترحة (اختياري — مثل كودك القديم)
-    if not dff_sidebar.empty:
         top_dept = dff_sidebar["الجهة"].mode().iloc[0] if not dff_sidebar["الجهة"].mode().empty else "غير محدد"
-        st.markdown("### 💡 مبادرات مقترحة", unsafe_allow_html=True)
-        st.markdown(f'<div class="rec-box">🚀 تحسين بيئة العمل وتطوير المزايا في {top_dept}</div>', unsafe_allow_html=True)
-        st.markdown('<div class="rec-box">📈 تكثيف برامج الاستبقاء للموظفين المتميزين</div>', unsafe_allow_html=True)
+        st.markdown("### 💡 توصيات", unsafe_allow_html=True)
+        st.markdown(f'<div class="rec-box">🚀 تعزيز برامج الاستبقاء داخل: {top_dept}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rec-box">📈 تحليل أسباب الاستقالة وتحسين تجربة الموظف</div>', unsafe_allow_html=True)
 
 with tab2:
     st.markdown("<h1>الاتجاهات</h1>", unsafe_allow_html=True)
 
-    gran = st.radio("الدقة الزمنية", ["يومي", "شهري"], horizontal=True)
-    freq = "D" if gran == "يومي" else "M"
-
-    ts = make_series(dff_sidebar, freq=freq).reset_index()
-    ts.columns = ["التاريخ", "العدد"]
-
-    fig = px.line(ts, x="التاريخ", y="العدد", markers=True, title=f"الاستقالات ({gran})")
-    st.plotly_chart(fig, use_container_width=True)
+    if dff_sidebar.empty:
+        st.info("لا توجد بيانات ضمن الفلاتر الحالية.")
+    else:
+        gran = st.radio("الدقة الزمنية", ["يومي", "شهري"], horizontal=True)
+        freq = "M" if gran == "شهري" else "D"
+        ts = make_series(dff_sidebar, freq=freq).reset_index()
+        ts.columns = ["التاريخ", "العدد"]
+        fig = px.line(ts, x="التاريخ", y="العدد", markers=True, title=f"الاتجاه ({gran})")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(ts.tail(120), use_container_width=True)
 
 with tab3:
     st.markdown("<h1>التوقعات</h1>", unsafe_allow_html=True)
 
-    mode = st.radio("نوع التوقع", ["يومي (30 يوم)", "شهري (6 أشهر)"], horizontal=True)
-
-    if mode.startswith("يومي"):
-        fc = forecast(dff_sidebar, steps=30, freq="D")
-        fig = px.area(fc, x="التاريخ", y="الحالات المتوقعة", title="توقع الاستقالات (30 يوم)")
+    if dff_sidebar.empty:
+        st.info("لا توجد بيانات ضمن الفلاتر الحالية.")
     else:
-        fc = forecast(dff_sidebar, steps=6, freq="M")
-        fig = px.bar(fc, x="التاريخ", y="الحالات المتوقعة", text_auto=True, title="توقع الاستقالات (6 أشهر)")
+        mode = st.radio("نوع التوقع", ["يومي (30 يوم)", "شهري (6 أشهر)", "سنوي (من الملف 2026-2028)", "مقارنة فعلي × متوقع (سنوي)"], horizontal=True)
 
-    st.metric("إجمالي المتوقع", int(fc["الحالات المتوقعة"].sum()))
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(fc, use_container_width=True)
+        if mode.startswith("يومي"):
+            fc = forecast_time(dff_sidebar, steps=30, freq="D")
+            fig = px.area(fc, x="التاريخ", y="الحالات المتوقعة", title="توقع الاستقالات (30 يوم)")
+            st.metric("إجمالي المتوقع", int(fc["الحالات المتوقعة"].sum()))
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(fc, use_container_width=True)
+
+        elif mode.startswith("شهري"):
+            fc = forecast_time(dff_sidebar, steps=6, freq="M")
+            fig = px.bar(fc, x="التاريخ", y="الحالات المتوقعة", text_auto=True, title="توقع الاستقالات (6 أشهر)")
+            st.metric("إجمالي المتوقع", int(fc["الحالات المتوقعة"].sum()))
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(fc, use_container_width=True)
+
+        elif mode.startswith("سنوي"):
+            if file_yearly_fc.empty:
+                st.warning("ملف التوقع غير جاهز.")
+            else:
+                yrs = [2026, 2027, 2028]
+                preds = file_yearly_fc[file_yearly_fc["السنة"].isin(yrs)].copy()
+                fig = px.bar(preds, x="السنة", y="الاستقالات المتوقعة (ملف)", text_auto=True, title="توقع سنوي (من الملف)")
+                st.metric("إجمالي المتوقع (3 سنوات)", int(preds["الاستقالات المتوقعة (ملف)"].sum()))
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(preds, use_container_width=True)
+
+        else:
+            act = actual_yearly_counts(dff_sidebar)
+            cmp_df = compare_actual_vs_file_forecast(act, file_yearly_fc)
+
+            if cmp_df.empty:
+                st.warning("لا توجد بيانات للمقارنة.")
+            else:
+                long = cmp_df.melt(id_vars="السنة",
+                                   value_vars=["الاستقالات الفعلية", "الاستقالات المتوقعة (ملف)"],
+                                   var_name="النوع", value_name="العدد")
+                fig = px.line(long, x="السنة", y="العدد", color="النوع", markers=True, title="مقارنة فعلي × متوقع (من الملف)")
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(cmp_df, use_container_width=True)
 
 with tab4:
     st.markdown("<h1>اسألني</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='small-muted'>اكتبي سؤال، وسيتم اختيار الرسم تلقائيًا (Pie/Bar/Line/Forecast) + فترة الحساب تُعرض دائمًا.</p>", unsafe_allow_html=True)
+    st.markdown("<p class='small-muted'>اكتبي سؤال… النظام يرد ويطلع رسم بياني تلقائيًا.</p>", unsafe_allow_html=True)
 
-    if u_input:
-        st.markdown("<h2 style='color: #00F5FF;'>🤖 إجابة المحلل الذكي:</h2>", unsafe_allow_html=True)
+    q = st.chat_input("مثال: ترند شهري | توزيع الجنسيات | أكثر جهة | توقع 30 يوم | توقع 2026 | أحدث سجلات جدول")
+
+    if q:
         with st.chat_message("assistant"):
-            msg, fig, table = auto_chart(dff_sidebar, u_input, top_n=top_n, sidebar_info=sidebar_info)
-            st.write(msg)
-            if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
-
-            # عرض الجدول فقط إذا المستخدم ذكر "جدول"
-            if table is not None and ("جدول" in u_input or "table" in u_input.lower()):
-                st.dataframe(table, use_container_width=True)
+            try:
+                msg, fig, table = auto_chart(dff_sidebar, q, top_n=top_n, sidebar_info=sidebar_info)
+                st.write(msg)
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True)
+                if table is not None:
+                    st.dataframe(table, use_container_width=True)
+            except Exception as e:
+                st.error("صار خطأ أثناء تحليل السؤال، لكن التطبيق شغال.")
+                st.code(str(e))
     else:
         st.markdown("""
         <div class="welcome-card">
-            <div style="margin-bottom: 20px;">
-                <span style="background: rgba(0, 245, 255, 0.1); color: #00F5FF; padding: 10px 25px; border-radius: 50px; font-size: 0.95rem; font-weight: bold; border: 1px solid rgba(0, 245, 255, 0.3);">
-                    نظام التحليل الاستراتيجي v3.0
-                </span>
-            </div>
-            <h1 style="margin-bottom: 18px;">منصة ذكاء الأعمال</h1>
-            <p style="color: #CBD5E1; font-size: 1.35rem; line-height: 1.8; max-width: 750px; margin: 0 auto;">
-                استخدمي الفلاتر في القائمة الجانبية، ثم اسألي سؤال في المحلل الذكي — سيظهر الرسم تلقائيًا مع فترة الحساب.
-            </p>
-            <p style="color: #94A3B8; font-size: 1.05rem; margin-top: 18px;">
-                أمثلة: <b>كم استقالوا آخر 3 شهور</b> — <b>توزيع الجنسيات</b> — <b>أكثر جهة</b> — <b>ترند شهري</b> — <b>توقع 30 يوم</b>
+            <h1 style="margin-bottom: 14px;">اسألني</h1>
+            <p style="color:#CBD5E1;font-size:1.15rem;line-height:1.9;max-width:760px;margin:0 auto;">
+            أمثلة:
+            <br><b>كم استقالوا آخر 3 شهور</b> — <b>توزيع الجنسيات</b> — <b>أكثر جهة</b> — <b>ترند شهري</b>
+            <br><b>توقع 30 يوم</b> — <b>توقع 6 أشهر</b> — <b>توقع 2026</b> — <b>أحدث سجلات جدول</b>
+            <br>فلترة داخل السؤال: <b>جهة: الموارد البشرية</b> أو <b>جنسية: سعودي</b>
             </p>
         </div>
         """, unsafe_allow_html=True)
 
-# تنبيه إذا الفلاتر ضيقة جدًا
 if dff_sidebar.empty:
     st.info("لا توجد بيانات ضمن فلاتر السايدبار الحالية. وسّعي الفترة أو أزيلي بعض الفلاتر.")
+
+st.markdown("<div style='text-align:center;color:#94A3B8;margin-top:10px;'>© Workforce Intelligence Platform | Dalal Hakami</div>", unsafe_allow_html=True)
